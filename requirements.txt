@@ -1,0 +1,8 @@
+numpy
+pandas
+pywt
+tqdm
+scikit-learn
+torch
+torchvision
+torchaudio
