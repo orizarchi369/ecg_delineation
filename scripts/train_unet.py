@@ -10,7 +10,7 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# Paths (adjusted for Colab nested extraction)
+# Paths
 data_dir = '/content/ecg_delineation/data/processed_cleaned'
 split_dir = '/content/ecg_delineation/data/splits'
 output_dir = '/content/drive/My Drive/ecg_project/models'
@@ -22,18 +22,7 @@ class ECGDataset(Dataset):
         self.data_dir = data_dir
         self.record_ids = record_ids
         self.files = [f for f in os.listdir(data_dir) if f.split('_')[0] in record_ids]
-        # Filter out files with NaN (commented out since NaN files are deleted)
-        # self.valid_files = []
-        # for file in self.files:
-        #     file_path = os.path.join(self.data_dir, file)
-        #     data = np.load(file_path, allow_pickle=True)
-        #     signal = data['signal']
-        #     labels = data['labels']
-        #     if not (np.any(np.isnan(signal)) or np.any(np.isnan(labels))):
-        #         self.valid_files.append(file)
-        # if len(self.files) > len(self.valid_files):
-        #     print(f"Filtered out {len(self.files) - len(self.valid_files)} files with NaN values")
-        self.valid_files = self.files  # Use all files since NaN are removed
+        self.valid_files = self.files  # No NaN filtering since files are manually cleaned
 
     def __len__(self):
         return len(self.valid_files)
@@ -45,26 +34,24 @@ class ECGDataset(Dataset):
         labels = data['labels'].astype(np.int64)
         return torch.from_numpy(signal).unsqueeze(0), torch.from_numpy(labels)
 
-# 1D U-Net Model
+# Simplified 1D U-Net Model
 class UNet1D(nn.Module):
     def __init__(self, in_channels=1, out_channels=4):
         super(UNet1D, self).__init__()
-        self.enc1 = nn.Conv1d(in_channels, 64, kernel_size=3, padding=1)
-        self.enc2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
+        self.enc1 = nn.Conv1d(in_channels, 32, kernel_size=3, padding=1)  # Reduced from 64
         self.pool = nn.MaxPool1d(2, 2)
-        self.upconv = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2)
-        self.dec1 = nn.Conv1d(64, 64, kernel_size=3, padding=1)
-        self.out = nn.Conv1d(128, out_channels, kernel_size=1)  # Matches 128 channels after concat
+        self.upconv = nn.ConvTranspose1d(32, 32, kernel_size=2, stride=2)
+        self.dec1 = nn.Conv1d(32, 32, kernel_size=3, padding=1)
+        self.out = nn.Conv1d(64, out_channels, kernel_size=1)  # 32 + 32 = 64
 
     def forward(self, x):
         e1 = torch.relu(self.enc1(x))
-        e2 = torch.relu(self.enc2(self.pool(e1)))
-        d1 = torch.relu(self.dec1(self.upconv(e2)))
-        d1 = torch.cat([d1, e1], dim=1)  # 64 + 64 = 128
+        d1 = torch.relu(self.dec1(self.upconv(self.pool(e1))))
+        d1 = torch.cat([d1, e1], dim=1)  # 32 + 32 = 64
         return self.out(d1)
 
-# Training function with device management and fixes
-def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
+# Training function with device management
+def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.001):  # Reduced epochs to 10
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
@@ -81,7 +68,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
             outputs = model(signals)
             loss = criterion(outputs, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             train_loss += loss.item()
         train_loss /= len(train_loader)
@@ -129,7 +116,7 @@ if __name__ == '__main__':
             splits[split] = [line.strip() for line in f]
 
     # Create datasets and loaders
-    batch_size = 32
+    batch_size = 16  # Reduced from 32 to optimize GPU usage
     datasets = {split: ECGDataset(splits[split], data_dir) for split in ['train', 'val', 'test']}
     loaders = {split: DataLoader(datasets[split], batch_size=batch_size, shuffle=(split == 'train')) for split in ['train', 'val', 'test']}
 
