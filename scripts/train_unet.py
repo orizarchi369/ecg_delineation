@@ -11,7 +11,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 # Paths (adjusted for Colab nested extraction)
-data_dir = '/content/ecg_delineation/data/processed_cleaned/data/processed_cleaned'
+data_dir = '/content/ecg_delineation/data/processed_cleaned'
 split_dir = '/content/ecg_delineation/data/splits'
 output_dir = '/content/drive/My Drive/ecg_project/models'
 os.makedirs(output_dir, exist_ok=True)
