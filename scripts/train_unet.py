@@ -10,10 +10,10 @@ from sklearn.metrics import f1_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# Paths
-data_dir = '/content/ecg_delineation/data/processed_cleaned'
-split_dir = '/content/ecg_delineation/data/splits'
-output_dir = '/content/drive/My Drive/ecg_project/models'  # Updated to Drive
+# Paths (adjusted for Colab nested extraction)
+data_dir = '/content/ecg_delineation/data/processed_cleaned/data/processed_cleaned'
+split_dir = '/content/ecg_delineation/data/splits/data/splits'
+output_dir = '/content/drive/My Drive/ecg_project/models'
 os.makedirs(output_dir, exist_ok=True)
 
 # Custom Dataset
@@ -30,12 +30,12 @@ class ECGDataset(Dataset):
         file_path = os.path.join(self.data_dir, self.files[idx])
         data = np.load(file_path, allow_pickle=True)
         signal = data['signal'].astype(np.float32)
-        labels = data['labels'].astype(np.long)
+        labels = data['labels'].astype(np.int64)
         return torch.from_numpy(signal).unsqueeze(0), torch.from_numpy(labels)
 
 # 1D U-Net Model
 class UNet1D(nn.Module):
-    def __init__(self, in_channels=1, out_channels=4):  # 4 classes: bg, P, QRS, T
+    def __init__(self, in_channels=1, out_channels=4):
         super(UNet1D, self).__init__()
         self.enc1 = nn.Conv1d(in_channels, 64, kernel_size=3, padding=1)
         self.enc2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
@@ -48,11 +48,13 @@ class UNet1D(nn.Module):
         e1 = torch.relu(self.enc1(x))
         e2 = torch.relu(self.enc2(self.pool(e1)))
         d1 = torch.relu(self.dec1(self.upconv(e2)))
-        d1 = torch.cat([d1, e1], dim=1)  # Simple skip connection
+        d1 = torch.cat([d1, e1], dim=1)
         return self.out(d1)
 
-# Training function (with Drive checkpoint saving)
+# Training function with device management
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     best_val_f1 = 0.0
@@ -62,6 +64,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
         model.train()
         train_loss = 0
         for signals, labels in tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}'):
+            signals, labels = signals.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(signals)
             loss = criterion(outputs.transpose(1, 2), labels)
@@ -71,12 +74,12 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
         train_loss /= len(train_loader)
         train_losses.append(train_loss)
 
-        # Validation
         model.eval()
         val_loss = 0
         all_preds, all_labels = [], []
         with torch.no_grad():
             for signals, labels in val_loader:
+                signals, labels = signals.to(device), labels.to(device)
                 outputs = model(signals)
                 loss = criterion(outputs.transpose(1, 2), labels)
                 val_loss += loss.item()
@@ -95,7 +98,6 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
             best_val_f1 = val_f1
             torch.save(model.state_dict(), os.path.join(output_dir, 'best_unet_model.pth'))
 
-    # Plot training curves
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label='Train Loss')
     plt.plot(val_losses, label='Val Loss')
