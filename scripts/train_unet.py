@@ -67,7 +67,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
             signals, labels = signals.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(signals)
-            loss = criterion(outputs.transpose(1, 2), labels)
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
