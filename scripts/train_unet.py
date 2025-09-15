@@ -1,4 +1,4 @@
-# scripts/train_unet.py
+# scripts/train_unet.py (with device management for Colab)
 
 import os
 import numpy as np
