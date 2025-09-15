@@ -1,4 +1,4 @@
-# scripts/train_unet.py 
+# scripts/train_unet.py
 
 import os
 import numpy as np
@@ -31,6 +31,8 @@ class ECGDataset(Dataset):
         data = np.load(file_path, allow_pickle=True)
         signal = data['signal'].astype(np.float32)
         labels = data['labels'].astype(np.int64)
+        if np.any(np.isnan(signal)) or np.any(np.isnan(labels)):
+            print(f"NaN detected in {file_path}")
         return torch.from_numpy(signal).unsqueeze(0), torch.from_numpy(labels)
 
 # 1D U-Net Model
@@ -42,7 +44,7 @@ class UNet1D(nn.Module):
         self.pool = nn.MaxPool1d(2, 2)
         self.upconv = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2)
         self.dec1 = nn.Conv1d(64, 64, kernel_size=3, padding=1)
-        self.out = nn.Conv1d(128, out_channels, kernel_size=1)  # Changed from 64 to 128
+        self.out = nn.Conv1d(128, out_channels, kernel_size=1)  # Matches 128 channels after concat
 
     def forward(self, x):
         e1 = torch.relu(self.enc1(x))
@@ -51,7 +53,7 @@ class UNet1D(nn.Module):
         d1 = torch.cat([d1, e1], dim=1)  # 64 + 64 = 128
         return self.out(d1)
 
-# Training function with device management
+# Training function with device management and fixes
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
@@ -67,8 +69,9 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
             signals, labels = signals.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(signals)
-            loss = criterion(outputs, labels)  # Remove transpose(1, 2)
+            loss = criterion(outputs, labels)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Gradient clipping
             optimizer.step()
             train_loss += loss.item()
         train_loss /= len(train_loader)
@@ -120,7 +123,10 @@ if __name__ == '__main__':
     datasets = {split: ECGDataset(splits[split], data_dir) for split in ['train', 'val', 'test']}
     loaders = {split: DataLoader(datasets[split], batch_size=batch_size, shuffle=(split == 'train')) for split in ['train', 'val', 'test']}
 
-    # Initialize and train model
+    # Initialize and train model with weight initialization
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = UNet1D().to(device)
+    for module in model.modules():
+        if isinstance(module, nn.Conv1d):
+            nn.init.kaiming_normal_(module.weight)
     train_model(model, loaders['train'], loaders['val'])
