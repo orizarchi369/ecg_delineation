@@ -11,9 +11,9 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 # Paths
-data_dir = '/home/orizarchi/projects/ecg_delineation/data/processed_cleaned'
-split_dir = '/home/orizarchi/projects/ecg_delineation/data/splits'
-output_dir = '/home/orizarchi/projects/ecg_delineation/outputs/models'
+data_dir = '/content/ecg_delineation/data/processed_cleaned'
+split_dir = '/content/ecg_delineation/data/splits'
+output_dir = '/content/drive/My Drive/ecg_project/models'  # Updated to Drive
 os.makedirs(output_dir, exist_ok=True)
 
 # Custom Dataset
@@ -51,7 +51,7 @@ class UNet1D(nn.Module):
         d1 = torch.cat([d1, e1], dim=1)  # Simple skip connection
         return self.out(d1)
 
-# Training function
+# Training function (with Drive checkpoint saving)
 def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -89,6 +89,8 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
         val_f1s.append(val_f1)
 
         print(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}')
+        checkpoint_path = os.path.join(output_dir, f'checkpoint_epoch_{epoch+1}.pth')
+        torch.save(model.state_dict(), checkpoint_path)
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
             torch.save(model.state_dict(), os.path.join(output_dir, 'best_unet_model.pth'))

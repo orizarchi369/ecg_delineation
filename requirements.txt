@@ -1,6 +1,6 @@
 numpy
 pandas
-pywt
+PyWavelets==1.5.0
 tqdm
 scikit-learn
 torch
