@@ -1,4 +1,4 @@
-# scripts/train_unet.py (with device management for Colab)
+# scripts/train_unet.py
 
 import os
 import numpy as np
@@ -41,14 +41,15 @@ class UNet1D(nn.Module):
         self.enc2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
         self.pool = nn.MaxPool1d(2, 2)
         self.upconv = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2)
-        self.dec1 = nn.Conv1d(128, 64, kernel_size=3, padding=1)
+        self.dec1 = nn.Conv1d(64, 64, kernel_size=3, padding=1)  # Changed from 128 to 64
         self.out = nn.Conv1d(64, out_channels, kernel_size=1)
 
     def forward(self, x):
         e1 = torch.relu(self.enc1(x))
         e2 = torch.relu(self.enc2(self.pool(e1)))
         d1 = torch.relu(self.dec1(self.upconv(e2)))
-        d1 = torch.cat([d1, e1], dim=1)
+        # Adjust skip connection to match dec1 input channels (64)
+        d1 = torch.cat([d1, e1[:, :64, :]], dim=1) if e1.size(1) > 64 else torch.cat([d1, e1], dim=1)
         return self.out(d1)
 
 # Training function with device management
