@@ -22,17 +22,26 @@ class ECGDataset(Dataset):
         self.data_dir = data_dir
         self.record_ids = record_ids
         self.files = [f for f in os.listdir(data_dir) if f.split('_')[0] in record_ids]
+        # Filter out files with NaN
+        self.valid_files = []
+        for file in self.files:
+            file_path = os.path.join(self.data_dir, file)
+            data = np.load(file_path, allow_pickle=True)
+            signal = data['signal']
+            labels = data['labels']
+            if not (np.any(np.isnan(signal)) or np.any(np.isnan(labels))):
+                self.valid_files.append(file)
+        if len(self.files) > len(self.valid_files):
+            print(f"Filtered out {len(self.files) - len(self.valid_files)} files with NaN values")
 
     def __len__(self):
-        return len(self.files)
+        return len(self.valid_files)
 
     def __getitem__(self, idx):
-        file_path = os.path.join(self.data_dir, self.files[idx])
+        file_path = os.path.join(self.data_dir, self.valid_files[idx])
         data = np.load(file_path, allow_pickle=True)
         signal = data['signal'].astype(np.float32)
         labels = data['labels'].astype(np.int64)
-        if np.any(np.isnan(signal)) or np.any(np.isnan(labels)):
-            print(f"NaN detected in {file_path}")
         return torch.from_numpy(signal).unsqueeze(0), torch.from_numpy(labels)
 
 # 1D U-Net Model
