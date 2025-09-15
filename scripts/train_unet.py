@@ -67,7 +67,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
             signals, labels = signals.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(signals)
-            loss = criterion(outputs, labels)
+            loss = criterion(outputs, labels)  # Remove transpose(1, 2)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -81,7 +81,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, lr=0.001):
             for signals, labels in val_loader:
                 signals, labels = signals.to(device), labels.to(device)
                 outputs = model(signals)
-                loss = criterion(outputs.transpose(1, 2), labels)
+                loss = criterion(outputs, labels)
                 val_loss += loss.item()
                 preds = torch.argmax(outputs, dim=1)
                 all_preds.extend(preds.cpu().numpy().flatten())
