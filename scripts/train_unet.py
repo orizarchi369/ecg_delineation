@@ -9,6 +9,14 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import argparse
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Train 1D U-Net for ECG segmentation on Lead II')
+parser.add_argument('--num_epochs', type=int, default=25, help='Number of epochs')
+parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+args = parser.parse_args()
 
 # Paths
 data_dir = '/content/ecg_delineation/data/processed_cleaned'
@@ -16,42 +24,46 @@ split_dir = '/content/ecg_delineation/data/splits'
 output_dir = '/content/drive/My Drive/ecg_project/models'
 os.makedirs(output_dir, exist_ok=True)
 
-# Custom Dataset
+# Custom Dataset for Lead II
 class ECGDataset(Dataset):
     def __init__(self, record_ids, data_dir):
         self.data_dir = data_dir
         self.record_ids = record_ids
-        self.files = [f for f in os.listdir(data_dir) if f.split('_')[0] in record_ids]
-        self.valid_files = self.files  # No NaN filtering since files are manually cleaned
+        self.files = [f for f in os.listdir(data_dir) if f.split('_')[0] in record_ids and 'ii' in f]  # Filter for lead II
 
     def __len__(self):
-        return len(self.valid_files)
+        return len(self.files)
 
     def __getitem__(self, idx):
-        file_path = os.path.join(self.data_dir, self.valid_files[idx])
+        file_path = os.path.join(self.data_dir, self.files[idx])
         data = np.load(file_path, allow_pickle=True)
         signal = data['signal'].astype(np.float32)
         labels = data['labels'].astype(np.int64)
         return torch.from_numpy(signal).unsqueeze(0), torch.from_numpy(labels)
 
-# Simplified 1D U-Net Model
+# 1D U-Net Model with two skip connections
 class UNet1D(nn.Module):
     def __init__(self, in_channels=1, out_channels=4):
         super(UNet1D, self).__init__()
-        self.enc1 = nn.Conv1d(in_channels, 32, kernel_size=3, padding=1)  # Reduced from 64
+        self.enc1 = nn.Conv1d(in_channels, 32, kernel_size=3, padding=1)
+        self.enc2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
         self.pool = nn.MaxPool1d(2, 2)
-        self.upconv = nn.ConvTranspose1d(32, 32, kernel_size=2, stride=2)
-        self.dec1 = nn.Conv1d(32, 32, kernel_size=3, padding=1)
-        self.out = nn.Conv1d(64, out_channels, kernel_size=1)  # 32 + 32 = 64
+        self.upconv = nn.ConvTranspose1d(64, 32, kernel_size=2, stride=2)
+        self.dec1 = nn.Conv1d(64, 32, kernel_size=3, padding=1)  # 32 from upconv + 32 from enc1
+        self.out = nn.Conv1d(64, out_channels, kernel_size=1)     # 32 from dec1 + 32 from enc2
+        self.dec2 = nn.Conv1d(32, 32, kernel_size=3, padding=1)  # Additional layer for second skip
 
     def forward(self, x):
-        e1 = torch.relu(self.enc1(x))
-        d1 = torch.relu(self.dec1(self.upconv(self.pool(e1))))
-        d1 = torch.cat([d1, e1], dim=1)  # 32 + 32 = 64
-        return self.out(d1)
+        e1 = torch.relu(self.enc1(x))  # First skip connection source
+        e2 = torch.relu(self.enc2(self.pool(e1)))  # Second skip connection source
+        d1 = torch.relu(self.upconv(self.pool(e2)))
+        d1 = torch.cat([d1, e1], dim=1)  # First skip: 32 + 32 = 64
+        d1 = torch.relu(self.dec1(d1))
+        d2 = torch.cat([d1, e2], dim=1)  # Second skip: 32 + 32 = 64
+        return self.out(self.dec2(d2))
 
 # Training function with device management
-def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.001):  # Reduced epochs to 10
+def train_model(model, train_loader, val_loader, num_epochs, lr):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
@@ -116,7 +128,7 @@ if __name__ == '__main__':
             splits[split] = [line.strip() for line in f]
 
     # Create datasets and loaders
-    batch_size = 16  # Reduced from 32 to optimize GPU usage
+    batch_size = args.batch_size
     datasets = {split: ECGDataset(splits[split], data_dir) for split in ['train', 'val', 'test']}
     loaders = {split: DataLoader(datasets[split], batch_size=batch_size, shuffle=(split == 'train')) for split in ['train', 'val', 'test']}
 
@@ -126,4 +138,4 @@ if __name__ == '__main__':
     for module in model.modules():
         if isinstance(module, nn.Conv1d):
             nn.init.kaiming_normal_(module.weight)
-    train_model(model, loaders['train'], loaders['val'])
+    train_model(model, loaders['train'], loaders['val'], num_epochs=args.num_epochs, lr=args.lr)
