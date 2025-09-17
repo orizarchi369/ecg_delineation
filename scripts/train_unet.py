@@ -48,19 +48,18 @@ class UNet1D(nn.Module):
         self.enc1 = nn.Conv1d(in_channels, 32, kernel_size=3, padding=1)
         self.enc2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
         self.pool = nn.MaxPool1d(2, 2)
-        self.upconv = nn.ConvTranspose1d(64, 32, kernel_size=2, stride=2, output_padding=1)  # Ensure 512 output
-        self.dec1 = nn.Conv1d(64, 32, kernel_size=3, padding=1)  # 32 from upconv + 32 from enc1
-        self.out = nn.Conv1d(64, out_channels, kernel_size=1)     # 32 from dec1 + 32 from enc2
-        self.dec2 = nn.Conv1d(32, 32, kernel_size=3, padding=1)  # Additional layer for second skip
+        self.upconv = nn.ConvTranspose1d(64, 64, kernel_size=2, stride=2, output_padding=1)  # Output 64 channels
+        self.dec1 = nn.Conv1d(128, 32, kernel_size=3, padding=1)  # 64 from upconv + 64 from enc2
+        self.out = nn.Conv1d(64, out_channels, kernel_size=1)      # 32 from dec1 + 32 from enc1
+        self.dec2 = nn.Conv1d(32, 32, kernel_size=3, padding=1)   # Additional layer for second skip
 
     def forward(self, x):
         e1 = torch.relu(self.enc1(x))  # [batch, 32, 512]
-        e2 = torch.relu(self.enc2(self.pool(e1)))  # [batch, 64, 256] after pool
-        d1 = self.upconv(e2)  # [batch, 32, 512] with output_padding
-        d1 = torch.relu(self.dec1(d1))
-        d1 = torch.cat([d1, e1], dim=1) if d1.size(2) == e1.size(2) else torch.cat([F.interpolate(d1, size=e1.size(2), mode='linear'), e1], dim=1)  # First skip: 32 + 32 = 64
-        d2 = torch.cat([self.dec2(d1), e2], dim=1)  # Second skip: 32 + 32 = 64, interpolate if needed
-        return self.out(d2)
+        e2 = torch.relu(self.enc2(self.pool(e1)))  # [batch, 64, 256]
+        d1 = self.upconv(e2)  # [batch, 64, 512] with output_padding
+        d1 = torch.relu(self.dec1(torch.cat([d1, e2], dim=1)))  # First skip: 64 + 64 = 128 -> 32
+        d2 = torch.cat([d1, e1], dim=1)  # Second skip: 32 + 32 = 64
+        return self.out(self.dec2(d2))
 
 # Training function with device management
 def train_model(model, train_loader, val_loader, num_epochs, lr):
