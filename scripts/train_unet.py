@@ -73,7 +73,7 @@ def train_model(model, train_loader, val_loader, num_epochs, lr):
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
     best_val_f1 = 0.0
     train_losses, val_losses, val_f1s = [], [], []
 
