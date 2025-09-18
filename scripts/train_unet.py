@@ -4,7 +4,6 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import f1_score
@@ -16,7 +15,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Train 1D U-Net for ECG segmentation on Lead II')
 parser.add_argument('--num_epochs', type=int, default=25, help='Number of epochs')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
-parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+parser.add_argument('--lr', type=float, default=0.0005, help='Learning rate')  # Lowered to 0.0005
 args = parser.parse_args()
 
 # Paths
@@ -42,32 +41,39 @@ class ECGDataset(Dataset):
         labels = data['labels'].astype(np.int64)
         return torch.from_numpy(signal).unsqueeze(0), torch.from_numpy(labels)
 
-# 1D U-Net Model with two skip connections
+# 1D U-Net Model with three skip connections
 class UNet1D(nn.Module):
     def __init__(self, in_channels=1, out_channels=4):
         super(UNet1D, self).__init__()
         self.enc1 = nn.Conv1d(in_channels, 32, kernel_size=3, padding=1)
         self.enc2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
+        self.enc3 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
         self.pool = nn.MaxPool1d(2, 2)
-        self.upconv = nn.ConvTranspose1d(64, 64, kernel_size=2, stride=2)  # Remove output_padding
-        self.dec1 = nn.Conv1d(128, 32, kernel_size=3, padding=1)  # 64 from upconv + 64 from enc2
-        self.out = nn.Conv1d(64, out_channels, kernel_size=1)      # 32 from dec1 + 32 from enc1
-        self.dec2 = nn.Conv1d(32, 32, kernel_size=3, padding=1)   # Additional layer for second skip
+        self.upconv1 = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2, output_padding=1)  # Adjust for size
+        self.upconv2 = nn.ConvTranspose1d(64, 32, kernel_size=2, stride=2, output_padding=1)  # Adjust for size
+        self.dec1 = nn.Conv1d(128, 64, kernel_size=3, padding=1)  # 64 from upconv + 64 from enc2
+        self.dec2 = nn.Conv1d(64, 32, kernel_size=3, padding=1)  # 32 from upconv + 32 from enc1
+        self.out = nn.Conv1d(32, out_channels, kernel_size=1)     # Final output from dec2
 
     def forward(self, x):
         e1 = torch.relu(self.enc1(x))  # [batch, 32, 512]
         e2 = torch.relu(self.enc2(self.pool(e1)))  # [batch, 64, 256]
-        d1 = self.upconv(e2)  # [batch, 64, 512] (upsamples 256 to 512)
-        d1 = torch.relu(self.dec1(torch.cat([d1, F.interpolate(e2, size=d1.size(2), mode='linear')], dim=1)))  # First skip: interpolate e2 to 512
-        d2 = torch.cat([self.dec2(d1), e1], dim=1)  # Second skip: 32 + 32 = 64
+        e3 = torch.relu(self.enc3(self.pool(e2)))  # [batch, 128, 128]
+        d1 = torch.relu(self.upconv1(e3))  # [batch, 64, 256]
+        d1 = torch.cat([d1, e2], dim=1)  # [batch, 128, 256]
+        d1 = torch.relu(self.dec1(d1))  # [batch, 64, 256]
+        d2 = torch.relu(self.upconv2(d1))  # [batch, 32, 512]
+        d2 = torch.cat([d2, e1], dim=1)  # [batch, 64, 512]
+        d2 = torch.relu(self.dec2(d2))  # [batch, 32, 512]
         return self.out(d2)
 
-# Training function with device management
+# Training function with device management and scheduler
 def train_model(model, train_loader, val_loader, num_epochs, lr):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
     best_val_f1 = 0.0
     train_losses, val_losses, val_f1s = [], [], []
 
@@ -100,6 +106,7 @@ def train_model(model, train_loader, val_loader, num_epochs, lr):
                 all_labels.extend(labels.cpu().numpy().flatten())
         val_loss /= len(val_loader)
         val_losses.append(val_loss)
+        scheduler.step(val_loss)  # Reduce LR if Val Loss stalls
         val_f1 = f1_score(all_labels, all_preds, average='weighted')
         val_f1s.append(val_f1)
 
