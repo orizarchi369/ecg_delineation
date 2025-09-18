@@ -49,8 +49,8 @@ class UNet1D(nn.Module):
         self.enc2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
         self.enc3 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
         self.pool = nn.MaxPool1d(2, 2)
-        self.upconv1 = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2, output_padding=1)  # Adjust for size
-        self.upconv2 = nn.ConvTranspose1d(64, 32, kernel_size=2, stride=2, output_padding=1)  # Adjust for size
+        self.upconv1 = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2)  # Remove output_padding
+        self.upconv2 = nn.ConvTranspose1d(64, 32, kernel_size=2, stride=2)  # Remove output_padding
         self.dec1 = nn.Conv1d(128, 64, kernel_size=3, padding=1)  # 64 from upconv + 64 from enc2
         self.dec2 = nn.Conv1d(64, 32, kernel_size=3, padding=1)  # 32 from upconv + 32 from enc1
         self.out = nn.Conv1d(32, out_channels, kernel_size=1)     # Final output from dec2
@@ -59,12 +59,12 @@ class UNet1D(nn.Module):
         e1 = torch.relu(self.enc1(x))  # [batch, 32, 512]
         e2 = torch.relu(self.enc2(self.pool(e1)))  # [batch, 64, 256]
         e3 = torch.relu(self.enc3(self.pool(e2)))  # [batch, 128, 128]
-        d1 = torch.relu(self.upconv1(e3))  # [batch, 64, 256]
-        d1 = torch.cat([d1, e2], dim=1)  # [batch, 128, 256]
-        d1 = torch.relu(self.dec1(d1))  # [batch, 64, 256]
-        d2 = torch.relu(self.upconv2(d1))  # [batch, 32, 512]
-        d2 = torch.cat([d2, e1], dim=1)  # [batch, 64, 512]
-        d2 = torch.relu(self.dec2(d2))  # [batch, 32, 512]
+        d1 = self.upconv1(e3)  # [batch, 64, 256]
+        d1 = torch.cat([d1, F.interpolate(e2, size=d1.size(2), mode='linear')], dim=1)  # [batch, 128, 256]
+        d1 = torch.relu(self.dec1(d1))
+        d2 = self.upconv2(d1)  # [batch, 32, 512]
+        d2 = torch.cat([d2, F.interpolate(e1, size=d2.size(2), mode='linear')], dim=1)  # [batch, 64, 512]
+        d2 = torch.relu(self.dec2(d2))
         return self.out(d2)
 
 # Training function with device management and scheduler
